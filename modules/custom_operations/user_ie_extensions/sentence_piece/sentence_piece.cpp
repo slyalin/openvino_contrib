@@ -18,6 +18,8 @@
 #include "openvino/opsets/opset10.hpp"
 #include "openvino/op/util/framework_node.hpp"
 
+#include <chrono>
+
 using sentencepiece::ModelProto;
 using sentencepiece::NormalizerSpec;
 using sentencepiece::SentencePieceProcessor;
@@ -49,6 +51,7 @@ namespace {
         // 6. add_bos
         // 7. add_eos
         // 8. reverse
+
         auto spm_model = static_cast<char*>(inputs[0].data());
         auto spm_model_size = inputs[0].get_byte_size();
 
@@ -57,14 +60,18 @@ namespace {
         auto begin_ids = reinterpret_cast<const int32_t*>(strings + 4);
         auto end_ids = begin_ids + 1;
         auto data = strings + 4 + 4 + 4*batch_size;
-
         auto nbest_size = *static_cast<int32_t*>(inputs[2].data());
         auto alpha = *static_cast<float*>(inputs[3].data());
+
+        static SentencePieceProcessor sp;
+        static bool first_time = true;
+        if(first_time) {
+            first_time = false;
+        auto start = std::chrono::high_resolution_clock::now();
         auto add_bos = *static_cast<bool*>(inputs[4].data());
         auto add_eos = *static_cast<bool*>(inputs[5].data());
         auto reverse = *static_cast<bool*>(inputs[6].data());
 
-        SentencePieceProcessor sp;
         std::string model_proto(spm_model, spm_model_size);
         CHECK_OK(sp.LoadFromSerializedProto(model_proto));
 
@@ -85,6 +92,9 @@ namespace {
         */
         // example of extra_options, if "bos:eos:reverse"
         CHECK_OK(sp.SetEncodeExtraOptions(extra_options));
+        auto end = std::chrono::high_resolution_clock::now();
+        std::cerr << "Preparation: " << std::chrono::duration<double>(end - start).count() << "\n";
+        }
 
         size_t max_token_id = 0;
         for (size_t batch_ind = 0; batch_ind < batch_size; ++batch_ind) {
@@ -92,7 +102,10 @@ namespace {
             auto end_ind = end_ids[batch_ind];
             std::vector<int32_t> ids;
             std::string sentence(data + begin_ind, data + end_ind);
+            auto start = std::chrono::high_resolution_clock::now();
             CHECK_OK(sp.SampleEncode(sentence, nbest_size, alpha, &ids));
+            auto end = std::chrono::high_resolution_clock::now();
+            std::cerr << "Tokenization: " << std::chrono::duration<double>(end - start).count() << "\n";
             // put into resulted vectors
             for (size_t token_id = 0; token_id < ids.size(); ++token_id) {
                 sparse_indices.push_back(static_cast<int32_t>(batch_ind));
@@ -123,6 +136,7 @@ void SentencepieceTokenizer::validate_and_infer_types() {
 }
 
 bool SentencepieceTokenizer::evaluate(ov::TensorVector& outputs, const ov::TensorVector& inputs) const {
+    auto start = std::chrono::high_resolution_clock::now();
     std::vector<int32_t> m_sparse_indices;
     std::vector<int32_t> m_sparse_values;
     std::vector<int32_t> m_sparse_dense_shape;
@@ -135,6 +149,8 @@ bool SentencepieceTokenizer::evaluate(ov::TensorVector& outputs, const ov::Tenso
     memcpy(outputs[1].data(), m_sparse_values.data(), sizeof(int32_t) * m_sparse_values.size());
     outputs[2].set_shape({ 2 });
     memcpy(outputs[2].data(), m_sparse_dense_shape.data(), sizeof(int32_t) * m_sparse_dense_shape.size());
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cerr << "Total: " << std::chrono::duration<double>(end - start).count() << "\n";
     return true;
 }
 
@@ -190,6 +206,8 @@ OutputVector translate_sentencepiece_tokenizer(const ov::frontend::NodeContext& 
 
     // create a node with custom operation
     auto sp_tokenizer_ext = std::make_shared<SentencepieceTokenizer>(inputs_vector);
+
+    std::cerr << "Here\n";
 
     return sp_tokenizer_ext->outputs();
 }
