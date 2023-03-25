@@ -172,7 +172,7 @@ OutputVector translate_sentencepiece_op(const ov::frontend::NodeContext& node) {
     return { sp_model_const };
 }
 
-OutputVector translate_sentencepiece_tokenizer(const ov::frontend::NodeContext& node) {
+frontend::NamedOutputVector translate_sentencepiece_tokenizer(const ov::frontend::NodeContext& node) {
     // this is custom translator that converts a sub-graph with SentencePieceOp, SentencePieceTokenizer,
     // and RaggedTensorToSparse operation- into a custom operation SentencepieceTokenizerExtensionOp
     FRONT_END_GENERAL_CHECK(node.get_input_size() > 0, "RaggedTensorToSparse expects at least one input.");
@@ -209,5 +209,9 @@ OutputVector translate_sentencepiece_tokenizer(const ov::frontend::NodeContext& 
 
     std::cerr << "Here\n";
 
-    return sp_tokenizer_ext->outputs();
+    return {
+        {"sparse_indices", sp_tokenizer_ext->output(0)},
+        {"sparse_values", sp_tokenizer_ext->output(1)},
+        {"sparse_dense_shape", sp_tokenizer_ext->output(2)},
+    };
 }
